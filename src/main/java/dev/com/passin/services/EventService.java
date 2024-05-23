@@ -2,7 +2,10 @@ package dev.com.passin.services;
 
 import dev.com.passin.domain.attendee.Attendee;
 import dev.com.passin.domain.event.Event;
+import dev.com.passin.domain.event.exceptions.EventFullException;
 import dev.com.passin.domain.event.exceptions.EventNotFoundException;
+import dev.com.passin.dto.attendee.AttendeeIdDTO;
+import dev.com.passin.dto.attendee.AttendeeRequestDTO;
 import dev.com.passin.dto.event.EventRequestDTO;
 import dev.com.passin.dto.event.EventResponseDTO;
 import dev.com.passin.dto.event.EventIdDTO;
@@ -11,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.text.Normalizer;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -20,8 +24,12 @@ public class EventService {
     private final EventRepository eventRepository;
     private final AttendeeService attendeeService;
 
+    private Event getEventById(String eventId) {
+        return this.eventRepository.findById(eventId).orElseThrow(() -> new EventNotFoundException("Event not found with ID: " + eventId));
+    }
+
     public EventResponseDTO getEventDetail(String eventId) {
-        Event event = this.eventRepository.findById(eventId).orElseThrow(() -> new EventNotFoundException("Event not found with ID: " + eventId));
+        Event event = this.getEventById(eventId);
         List<Attendee> attendeeList = this.attendeeService.getAttendeesFromEvent(eventId);
         return new EventResponseDTO(event, attendeeList.size());
     }
@@ -41,6 +49,26 @@ public class EventService {
 
     private String createSlug(String text) {
         String normalized = Normalizer.normalize(text, Normalizer.Form.NFD);
-        return normalized.replaceAll("[\\p{InCOMBINING_DIACRITICAL_MARKS}]", "").replaceAll("[^\\w\\s]", "").replaceAll("\\s+", "-").toLowerCase();
+        return normalized.replaceAll("\\p{InCOMBINING_DIACRITICAL_MARKS}", "").replaceAll("[^\\w\\s]", "").replaceAll("\\s+", "-").toLowerCase();
+    }
+
+    public AttendeeIdDTO registerAttendeeOnEvent(String eventId, AttendeeRequestDTO attendeeRequestDTO) {
+        this.attendeeService.verifyAttendeeSubscripton(attendeeRequestDTO.email(), eventId);
+
+        Event event = this.getEventById(eventId);
+        List<Attendee> attendeeList = this.attendeeService.getAttendeesFromEvent(eventId);
+
+        if (event.getMaximumAttendees() <= attendeeList.size()) {
+            throw new EventFullException("Event is full");
+        }
+
+        Attendee newAttendee = new Attendee();
+        newAttendee.setName(attendeeRequestDTO.name());
+        newAttendee.setEmail(attendeeRequestDTO.email());
+        newAttendee.setEvent(event);
+        newAttendee.setCreatedAt(LocalDateTime.now());
+        this.attendeeService.registerAttendee(newAttendee);
+
+        return new AttendeeIdDTO(newAttendee.getId());
     }
 }
